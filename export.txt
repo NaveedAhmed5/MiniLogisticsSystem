@@ -1,0 +1,7 @@
+REPORT TYPE: Drivers
+Generated: 2025-11-22T16:38:31.689493100
+
+Bob | Suspended | Rating: 4.8 | Vehicle: Toyota Van (ABC-123)
+Charlie | Active | Rating: 4.5 | Vehicle: Honda Bike (XYZ-789)
+Dave | Suspended | Rating: 2.0 | Vehicle: Ford Truck (TRK-001)
+

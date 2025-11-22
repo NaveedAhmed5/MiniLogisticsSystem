@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
 
 /**
  * MINI LOGISTICS & DELIVERY TRACKER
- * VERSION: Class Diagram Compliant (Fixed Compilation Error)
+ * VERSION: Class Diagram Compliant (Fixed Compilation Error & Read-Only Tables)
  * * ARCHITECTURE:
  * - Entities: User, Driver, Admin, Vehicle, Delivery, Assignment, AuditLog
  * - Controllers: DriverController, DeliveryController, ReportController
@@ -321,7 +321,15 @@ class DriverMgmtPanel extends JPanel {
 
         // Updated Table Columns based on Class Diagram (Vehicle info included)
         String[] cols = {"ID", "Name", "Status", "Vehicle Model", "Plate No", "Capacity (kg)", "Rating"};
-        model = new DefaultTableModel(cols, 0);
+        
+        // OVERRIDE isCellEditable TO MAKE TABLE READ-ONLY
+        model = new DefaultTableModel(cols, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        
         JTable table = new JTable(model);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
@@ -379,7 +387,15 @@ class AssignDeliveryPanel extends JPanel {
         setLayout(new BorderLayout());
         
         String[] cols = {"ID", "Description", "Route", "Status", "Assigned Driver", "Priority", "Deadline"};
-        model = new DefaultTableModel(cols, 0);
+        
+        // OVERRIDE isCellEditable TO MAKE TABLE READ-ONLY
+        model = new DefaultTableModel(cols, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        
         JTable table = new JTable(model);
         add(new JScrollPane(table), BorderLayout.CENTER);
 
@@ -453,7 +469,15 @@ class LogsPanel extends JPanel {
         this.frame = frame;
         setLayout(new BorderLayout());
         String[] cols = {"Time", "Category", "Details"};
-        model = new DefaultTableModel(cols, 0);
+        
+        // OVERRIDE isCellEditable TO MAKE TABLE READ-ONLY
+        model = new DefaultTableModel(cols, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        
         JTable table = new JTable(model);
         sorter = new TableRowSorter<>(model);
         table.setRowSorter(sorter);
@@ -474,7 +498,7 @@ class LogsPanel extends JPanel {
 }
 
 class ReportPanel extends JPanel {
-    private MainFrame frame; // ADDED MISSING FIELD HERE
+    private MainFrame frame; 
     private JComboBox<String> typeCombo;
     private JTextArea previewArea;
 
@@ -494,7 +518,11 @@ class ReportPanel extends JPanel {
         controls.add(exportBtn);
         
         add(controls, BorderLayout.NORTH);
+        
+        // MAKE TEXT AREA READ-ONLY
         previewArea = new JTextArea();
+        previewArea.setEditable(false); 
+        
         add(new JScrollPane(previewArea), BorderLayout.CENTER);
         
         genBtn.addActionListener(e -> {
