@@ -1,539 +1,280 @@
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.io.IOException;
+import java.sql.*;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
- * MINI LOGISTICS & DELIVERY TRACKER
- * VERSION: Class Diagram Compliant (Fixed Compilation Error & Read-Only Tables)
- * * ARCHITECTURE:
- * - Entities: User, Driver, Admin, Vehicle, Delivery, Assignment, AuditLog
- * - Controllers: DriverController, DeliveryController, ReportController
- * - View: AdminDashboard (Swing)
+ * MINI LOGISTICS - ADMIN PORTAL
+ * * Database Connected Version
+ * * Connects to 'logistics_db' via XAMPP (MySQL)
+ * * FIXED: Explicitly loading MySQL Driver to prevent "No suitable driver" error.
  */
-
 public class MiniLogisticsApp {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
             try {
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (Exception e) { e.printStackTrace(); }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
             new MainFrame().setVisible(true);
         });
     }
 }
 
-// ===========================
-// 1. ENTITY LAYER (Domain Model)
-// ===========================
-
-abstract class User {
-    protected int userID;
-    protected String name;
-    protected String email;
-    protected String role;
-
-    public User(int userID, String name, String email, String role) {
-        this.userID = userID;
-        this.name = name;
-        this.email = email;
-        this.role = role;
-    }
-    public int getUserID() { return userID; }
-    public String getName() { return name; }
-    public String getRole() { return role; }
-    public String getEmail() { return email; }
-}
-
-class Vehicle {
-    private String model;
-    private String plateNo;
-    private double capacity; // e.g., in kg
-
-    public Vehicle(String model, String plateNo, double capacity) {
-        this.model = model;
-        this.plateNo = plateNo;
-        this.capacity = capacity;
-    }
+// ==========================================
+// 1. DATABASE CONFIGURATION
+// ==========================================
+class AdminDBConfig {
+    static final String URL = "jdbc:mysql://localhost:3306/logistics_db";
+    static final String USER = "root";
+    static final String PASS = ""; // Default XAMPP password
     
-    public String getDetails() { return model + " (" + plateNo + ")"; }
-    public double getCapacity() { return capacity; }
-}
-
-class Driver extends User {
-    private String licenseNo;
-    private String status; // Active, Suspended, etc.
-    private double rating;
-    private int activeJobs;
-    private Vehicle vehicle; // Association: Driver owns Vehicle
-
-    public Driver(int id, String name, String email, String licenseNo, String status, double rating, Vehicle vehicle) {
-        super(id, name, email, "DRIVER");
-        this.licenseNo = licenseNo;
-        this.status = status;
-        this.rating = rating;
-        this.vehicle = vehicle;
-        this.activeJobs = 0;
-    }
-
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
-    public int getActiveJobs() { return activeJobs; }
-    public void incrementJobs() { this.activeJobs++; }
-    public double getRating() { return rating; }
-    public Vehicle getVehicle() { return vehicle; }
-}
-
-class Admin extends User {
-    public Admin(int id, String name, String email) { super(id, name, email, "ADMIN"); }
-}
-
-class Assignment {
-    private int assignmentID;
-    private String priorityLevel;
-    private LocalDateTime deadline;
-    private LocalDateTime assignedAt;
-
-    public Assignment(int id, String priority, LocalDateTime deadline) {
-        this.assignmentID = id;
-        this.priorityLevel = priority;
-        this.deadline = deadline;
-        this.assignedAt = LocalDateTime.now();
-    }
-    
-    public String getPriority() { return priorityLevel; }
-    public String getDeadlineStr() { return deadline.format(DateTimeFormatter.ofPattern("MM-dd HH:mm")); }
-}
-
-class Delivery {
-    private int deliveryID;
-    private String description;
-    private String pickupLocation;
-    private String dropoffLocation;
-    private String status; // PENDING, ASSIGNED, DELIVERED
-    private int assignedDriverID; // 0 if null
-    private Assignment assignment; // Composition: Delivery has an Assignment
-
-    public Delivery(int id, String desc, String pickup, String dropoff) {
-        this.deliveryID = id;
-        this.description = desc;
-        this.pickupLocation = pickup;
-        this.dropoffLocation = dropoff;
-        this.status = "PENDING";
-        this.assignedDriverID = 0;
-    }
-
-    public int getDeliveryID() { return deliveryID; }
-    public String getDescription() { return description; }
-    public String getRoute() { return pickupLocation + " -> " + dropoffLocation; }
-    public String getStatus() { return status; }
-    public int getAssignedDriverID() { return assignedDriverID; }
-    public Assignment getAssignment() { return assignment; }
-
-    public void assign(int driverID, Assignment assignment) {
-        this.assignedDriverID = driverID;
-        this.assignment = assignment;
-        this.status = "ASSIGNED";
-    }
-}
-
-class AuditLog {
-    private LocalDateTime timestamp;
-    private String category;
-    private String details;
-
-    public AuditLog(String category, String details) {
-        this.timestamp = LocalDateTime.now();
-        this.category = category;
-        this.details = details;
-    }
-    public String toString() { return timestamp.format(DateTimeFormatter.ISO_LOCAL_TIME) + " [" + category + "] " + details; }
-    public String getCategory() { return category; }
-    public String getDetails() { return details; }
-    public String getTime() { return timestamp.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")); }
-}
-
-// ===========================
-// 2. CONTROLLER LAYER
-// ===========================
-
-// Mock Database (Single Source of Truth)
-class Database {
-    static List<User> users = new ArrayList<>();
-    static List<Delivery> deliveries = new ArrayList<>();
-    static List<AuditLog> logs = new ArrayList<>();
-    
-    static {
-        // Mock Data
-        users.add(new Admin(1, "SuperAdmin", "admin@sys.com"));
-        users.add(new Driver(101, "Bob", "bob@sys.com", "LIC-999", "Active", 4.8, new Vehicle("Toyota Van", "ABC-123", 500.0)));
-        users.add(new Driver(102, "Charlie", "charlie@sys.com", "LIC-888", "Active", 4.5, new Vehicle("Honda Bike", "XYZ-789", 50.0)));
-        users.add(new Driver(103, "Dave", "dave@sys.com", "LIC-777", "Suspended", 2.0, new Vehicle("Ford Truck", "TRK-001", 1000.0)));
-
-        deliveries.add(new Delivery(501, "Medical Supplies", "Hospital A", "Clinic B"));
-        deliveries.add(new Delivery(502, "Office Chairs", "Warehouse", "Office 5"));
-        
-        logs.add(new AuditLog("SYSTEM", "System Initialized"));
-    }
-}
-
-class DriverController {
-    public List<Driver> getAllDrivers() {
-        return Database.users.stream().filter(u -> u instanceof Driver).map(u -> (Driver)u).collect(Collectors.toList());
-    }
-
-    public Driver getDriver(int id) {
-        return (Driver) Database.users.stream().filter(u -> u.getUserID() == id).findFirst().orElse(null);
-    }
-
-    public boolean updateStatus(int driverID, String newStatus, String reason) {
-        Driver d = getDriver(driverID);
-        if (d == null) return false;
-
-        // Validation Rule: Cannot deactivate if active jobs exist
-        if (("Inactive".equals(newStatus) || "Suspended".equals(newStatus)) && d.getActiveJobs() > 0) {
-            Database.logs.add(new AuditLog("ERROR", "Failed status update for " + d.getName() + " (Has active jobs)"));
-            return false;
+    public static Connection getConnection() throws SQLException {
+        try {
+            // FORCE LOAD DRIVER
+            Class.forName("com.mysql.cj.jdbc.Driver");
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
+            throw new SQLException("MySQL Driver not found in classpath");
         }
-
-        String old = d.getStatus();
-        d.setStatus(newStatus);
-        Database.logs.add(new AuditLog("ADMIN", "Driver " + d.getName() + " status: " + old + " -> " + newStatus + ". Reason: " + reason));
-        return true;
+        return DriverManager.getConnection(URL, USER, PASS);
     }
 }
 
-class DeliveryController {
-    public List<Delivery> getAllDeliveries() { return Database.deliveries; }
+// ==========================================
+// 2. ENTITIES (Renamed to avoid conflicts)
+// ==========================================
+class AdminVehicle {
+    String model, plate;
+    double capacity;
+    public AdminVehicle(String m, String p, double c) { model=m; plate=p; capacity=c; }
+    public String getDetails() { return model + " (" + plate + ")"; }
+}
 
-    public String assignDriver(int deliveryID, int driverID, String priority, int deadlineHours) {
-        Delivery delivery = Database.deliveries.stream().filter(d -> d.getDeliveryID() == deliveryID).findFirst().orElse(null);
-        Driver driver = (Driver) Database.users.stream().filter(u -> u.getUserID() == driverID).findFirst().orElse(null);
-
-        if (delivery == null || driver == null) return "Error: Not found";
-
-        // Business Logic Checks
-        if (!"Active".equals(driver.getStatus())) return "Error: Driver is not Active";
-        if (driver.getActiveJobs() >= 3) return "Warning: Driver overloaded";
-
-        // Create Assignment Object (Class Diagram requirement)
-        Assignment assignment = new Assignment(
-            (int)(Math.random()*1000), 
-            priority, 
-            LocalDateTime.now().plusHours(deadlineHours)
-        );
-
-        delivery.assign(driverID, assignment);
-        driver.incrementJobs();
-        
-        Database.logs.add(new AuditLog("OPERATION", "Assigned Delivery " + deliveryID + " to " + driver.getName()));
-        return "Success";
+class AdminDriverEntity {
+    int id;
+    String name, status;
+    double rating;
+    int activeJobs;
+    AdminVehicle vehicle;
+    
+    public AdminDriverEntity(int id, String name, String status, double rating, int jobs, AdminVehicle v) {
+        this.id = id; this.name = name; this.status = status; 
+        this.rating = rating; this.activeJobs = jobs; this.vehicle = v;
     }
 }
 
-class ReportController {
-    public List<AuditLog> getLogs() { return Database.logs; }
+class AdminDeliveryEntity {
+    int id, assignedDriverId;
+    String desc, route, status, priority, deadline;
+    
+    public AdminDeliveryEntity(int id, String desc, String route, String status, int driverId, String pri, String dead) {
+        this.id = id; this.desc = desc; this.route = route; this.status = status;
+        this.assignedDriverId = driverId; this.priority = pri; this.deadline = dead;
+    }
+    
+    public Object[] toRow() {
+        return new Object[]{id, desc, route, status, assignedDriverId == 0 ? "Unassigned" : assignedDriverId, priority == null ? "-" : priority, deadline == null ? "-" : deadline};
+    }
+}
+
+class AdminAuditLog {
+    String time, cat, det;
+    public AdminAuditLog(String t, String c, String d) { time=t; cat=c; det=d; }
+}
+
+// ==========================================
+// 3. CONTROLLER
+// ==========================================
+class AdminPortalController {
+    
+    public List<AdminDriverEntity> getDrivers() {
+        List<AdminDriverEntity> list = new ArrayList<>();
+        // Note: We calculate active_jobs dynamically now as it was removed from drivers table
+        String sql = "SELECT u.user_id, u.name, d.status, d.rating, " +
+                     "(SELECT COUNT(*) FROM deliveries del WHERE del.assigned_driver_id = d.user_id AND del.status != 'COMPLETED' AND del.status != 'CANCELLED') as active_jobs, " +
+                     "v.model, v.plate_no, v.capacity " +
+                     "FROM drivers d JOIN users u ON d.user_id = u.user_id " +
+                     "JOIN vehicles v ON d.vehicle_id = v.vehicle_id";
+
+        try (Connection conn = AdminDBConfig.getConnection(); 
+             Statement stmt = conn.createStatement(); 
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while(rs.next()) {
+                AdminVehicle v = new AdminVehicle(rs.getString("model"), rs.getString("plate_no"), rs.getDouble("capacity"));
+                list.add(new AdminDriverEntity(rs.getInt("user_id"), rs.getString("name"), rs.getString("status"), rs.getDouble("rating"), rs.getInt("active_jobs"), v));
+            }
+        } catch (SQLException e) { e.printStackTrace(); }
+        return list;
+    }
+
+    public boolean updateDriverStatus(int id, String status, String reason) {
+        try (Connection conn = AdminDBConfig.getConnection()) {
+            // Check active jobs using dynamic query
+            String checkSql = "SELECT COUNT(*) FROM deliveries WHERE assigned_driver_id=? AND status != 'COMPLETED' AND status != 'CANCELLED'";
+            PreparedStatement check = conn.prepareStatement(checkSql);
+            check.setInt(1, id);
+            ResultSet rs = check.executeQuery();
+            
+            if(rs.next() && rs.getInt(1) > 0 && ("Inactive".equals(status) || "Suspended".equals(status))) return false;
+
+            PreparedStatement ps = conn.prepareStatement("UPDATE drivers SET status=? WHERE user_id=?");
+            ps.setString(1, status); ps.setInt(2, id);
+            ps.executeUpdate();
+            return true;
+        } catch (SQLException e) { return false; }
+    }
+
+    public List<AdminDeliveryEntity> getDeliveries() {
+        List<AdminDeliveryEntity> list = new ArrayList<>();
+        String sql = "SELECT d.*, a.priority, a.deadline FROM deliveries d LEFT JOIN assignments a ON d.delivery_id = a.delivery_id";
+        try (Connection conn = AdminDBConfig.getConnection(); 
+             Statement stmt = conn.createStatement(); 
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while(rs.next()) {
+                list.add(new AdminDeliveryEntity(rs.getInt("delivery_id"), rs.getString("description"), rs.getString("pickup")+" -> "+rs.getString("dropoff"), rs.getString("status"), rs.getInt("assigned_driver_id"), rs.getString("priority"), rs.getString("deadline")));
+            }
+        } catch (SQLException e) { e.printStackTrace(); }
+        return list;
+    }
+
+    public String assignDriver(int delId, int drvId, String pri, int hours) {
+        try (Connection conn = AdminDBConfig.getConnection()) {
+            conn.setAutoCommit(false);
+            PreparedStatement ps = conn.prepareStatement("SELECT status FROM drivers WHERE user_id=?");
+            ps.setInt(1, drvId); ResultSet rs = ps.executeQuery();
+            if(!rs.next() || !"Active".equals(rs.getString("status"))) return "Error: Driver not active";
+
+            PreparedStatement ps2 = conn.prepareStatement("INSERT INTO assignments (delivery_id, priority, deadline) VALUES (?,?,?)");
+            ps2.setInt(1, delId); ps2.setString(2, pri); 
+            ps2.setTimestamp(3, Timestamp.valueOf(LocalDateTime.now().plusHours(hours)));
+            ps2.executeUpdate();
+
+            conn.createStatement().executeUpdate("UPDATE deliveries SET status='ASSIGNED', assigned_driver_id="+drvId+" WHERE delivery_id="+delId);
+            conn.commit();
+            return "Success";
+        } catch (SQLException e) { return "DB Error: " + e.getMessage(); }
+    }
+
+    public List<AdminAuditLog> getLogs() {
+        List<AdminAuditLog> logs = new ArrayList<>();
+        try(Connection c = AdminDBConfig.getConnection(); ResultSet rs = c.createStatement().executeQuery("SELECT * FROM audit_logs ORDER BY log_id DESC")) {
+            while(rs.next()) logs.add(new AdminAuditLog(rs.getString("timestamp"), rs.getString("category"), rs.getString("details")));
+        } catch (SQLException e) {}
+        return logs;
+    }
 
     public String generateReport(String type) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("REPORT TYPE: ").append(type).append("\n");
-        sb.append("Generated: ").append(LocalDateTime.now()).append("\n\n");
-
+        StringBuilder sb = new StringBuilder("=== ADMIN REPORT ===\nGenerated: " + LocalDateTime.now() + "\n\n");
         if ("Drivers".equals(type)) {
-            for(User u : Database.users) {
-                if(u instanceof Driver) {
-                    Driver d = (Driver)u;
-                    sb.append(String.format("%s | %s | Rating: %.1f | Vehicle: %s\n", 
-                        d.getName(), d.getStatus(), d.getRating(), d.getVehicle().getDetails()));
-                }
-            }
+            for(AdminDriverEntity d : getDrivers()) sb.append(String.format("%s | %s | Jobs: %d\n", d.name, d.status, d.activeJobs));
         } else {
-            for(Delivery d : Database.deliveries) {
-                String assignInfo = d.getAssignment() == null ? "Unassigned" : "Pri: " + d.getAssignment().getPriority();
-                sb.append(String.format("ID %d | %s | %s | %s\n", 
-                    d.getDeliveryID(), d.getStatus(), d.getRoute(), assignInfo));
-            }
+            for(AdminDeliveryEntity d : getDeliveries()) sb.append(String.format("ID %d | %s | %s\n", d.id, d.status, d.desc));
         }
         return sb.toString();
     }
 }
 
-// ===========================
-// 3. UI LAYER (Swing)
-// ===========================
-
+// ==========================================
+// 4. VIEW LAYER
+// ==========================================
 class MainFrame extends JFrame {
-    // Controllers
-    DriverController driverCtrl = new DriverController();
-    DeliveryController deliveryCtrl = new DeliveryController();
-    ReportController reportCtrl = new ReportController();
-
+    AdminPortalController ctrl = new AdminPortalController();
     public MainFrame() {
-        setTitle("Logistics Manager - Admin Console");
-        setSize(1100, 750);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setTitle("Admin Console - DB Connected"); setSize(1000,700); setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        add(new AdminPanel(this));
-    }
-}
-
-class AdminPanel extends JPanel {
-    public AdminPanel(MainFrame frame) {
-        setLayout(new BorderLayout());
-        
-        // Header
-        JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        header.setBackground(new Color(44, 62, 80));
-        JLabel title = new JLabel("  Admin Dashboard");
-        title.setForeground(Color.WHITE);
-        title.setFont(new Font("Segoe UI", Font.BOLD, 18));
-        header.add(title);
-        add(header, BorderLayout.NORTH);
-
-        // Tabs
         JTabbedPane tabs = new JTabbedPane();
-        tabs.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        
-        tabs.addTab("Manage Drivers", new DriverMgmtPanel(frame));
-        tabs.addTab("Assign Deliveries", new AssignDeliveryPanel(frame));
-        tabs.addTab("System Logs", new LogsPanel(frame));
-        tabs.addTab("Reports", new ReportPanel(frame)); 
-
-        add(tabs, BorderLayout.CENTER);
+        tabs.addTab("Drivers", new DriverPanel(ctrl));
+        tabs.addTab("Assignments", new AssignPanel(ctrl));
+        tabs.addTab("Logs", new LogPanel(ctrl));
+        tabs.addTab("Reports", new ReportPanel(ctrl));
+        add(tabs);
     }
 }
 
-class DriverMgmtPanel extends JPanel {
-    private MainFrame frame;
-    private DefaultTableModel model;
-
-    public DriverMgmtPanel(MainFrame frame) {
-        this.frame = frame;
+class DriverPanel extends JPanel {
+    public DriverPanel(AdminPortalController ctrl) {
         setLayout(new BorderLayout());
+        DefaultTableModel model = new DefaultTableModel(new String[]{"ID", "Name", "Status", "Jobs", "Rating", "Vehicle"}, 0);
+        add(new JScrollPane(new JTable(model)), BorderLayout.CENTER);
+        JPanel bot = new JPanel();
+        JButton ref = new JButton("Refresh"), act = new JButton("Activate"), susp = new JButton("Suspend");
+        bot.add(ref); bot.add(act); bot.add(susp);
+        add(bot, BorderLayout.SOUTH);
 
-        // Updated Table Columns based on Class Diagram (Vehicle info included)
-        String[] cols = {"ID", "Name", "Status", "Vehicle Model", "Plate No", "Capacity (kg)", "Rating"};
-        
-        // OVERRIDE isCellEditable TO MAKE TABLE READ-ONLY
-        model = new DefaultTableModel(cols, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
-        };
-        
-        JTable table = new JTable(model);
-        add(new JScrollPane(table), BorderLayout.CENTER);
-
-        JPanel controls = new JPanel();
-        JButton btnActivate = new JButton("Activate");
-        JButton btnSuspend = new JButton("Suspend");
-        JButton btnDeactivate = new JButton("Deactivate"); 
-
-        controls.add(btnActivate);
-        controls.add(btnSuspend);
-        controls.add(btnDeactivate);
-        add(controls, BorderLayout.SOUTH);
-
-        btnActivate.addActionListener(e -> updateStatus("Active"));
-        btnSuspend.addActionListener(e -> updateStatus("Suspended"));
-        btnDeactivate.addActionListener(e -> updateStatus("Inactive"));
-
-        refresh();
-    }
-
-    private void updateStatus(String newStatus) {
-        int row = ((JTable)((JScrollPane)getComponent(0)).getViewport().getView()).getSelectedRow();
-        if (row == -1) return;
-        
-        int id = (Integer) model.getValueAt(row, 0);
-        String reason = JOptionPane.showInputDialog(this, "Reason:");
-        
-        boolean success = frame.driverCtrl.updateStatus(id, newStatus, reason == null ? "Admin Action" : reason);
-        if (success) refresh();
-        else JOptionPane.showMessageDialog(this, "Failed: Driver has active jobs or not found.");
-    }
-
-    private void refresh() {
-        model.setRowCount(0);
-        for(Driver d : frame.driverCtrl.getAllDrivers()) {
-            model.addRow(new Object[]{
-                d.getUserID(), d.getName(), d.getStatus(), 
-                d.getVehicle().getDetails().split("\\(")[0], // Model
-                d.getVehicle().getDetails(), // Full Details (Lazy fix for Plate)
-                d.getVehicle().getCapacity(), d.getRating()
-            });
-        }
-    }
-}
-
-class AssignDeliveryPanel extends JPanel {
-    private MainFrame frame;
-    private DefaultTableModel model;
-    private JComboBox<String> driverCombo;
-    private JComboBox<String> priorityCombo;
-    private JComboBox<String> deadlineCombo;
-
-    public AssignDeliveryPanel(MainFrame frame) {
-        this.frame = frame;
-        setLayout(new BorderLayout());
-        
-        String[] cols = {"ID", "Description", "Route", "Status", "Assigned Driver", "Priority", "Deadline"};
-        
-        // OVERRIDE isCellEditable TO MAKE TABLE READ-ONLY
-        model = new DefaultTableModel(cols, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
-        };
-        
-        JTable table = new JTable(model);
-        add(new JScrollPane(table), BorderLayout.CENTER);
-
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        
-        bottom.add(new JLabel("Driver:"));
-        driverCombo = new JComboBox<>();
-        bottom.add(driverCombo);
-        
-        bottom.add(new JLabel("Priority:"));
-        priorityCombo = new JComboBox<>(new String[]{"Standard", "High", "Urgent"});
-        bottom.add(priorityCombo);
-
-        bottom.add(new JLabel("Deadline (Hrs):"));
-        deadlineCombo = new JComboBox<>(new String[]{"24", "48", "72"});
-        bottom.add(deadlineCombo);
-        
-        JButton assignBtn = new JButton("Assign");
-        bottom.add(assignBtn);
-        add(bottom, BorderLayout.SOUTH);
-
-        assignBtn.addActionListener(e -> {
-            int row = table.getSelectedRow();
-            if (row == -1) return;
-            
-            String selectedDriver = (String) driverCombo.getSelectedItem();
-            if (selectedDriver == null) return;
-            int driverID = Integer.parseInt(selectedDriver.split(":")[0]);
-            int deliveryID = (Integer) model.getValueAt(row, 0);
-            
-            String res = frame.deliveryCtrl.assignDriver(deliveryID, driverID, 
-                (String)priorityCombo.getSelectedItem(), 
-                Integer.parseInt((String)deadlineCombo.getSelectedItem())
-            );
-            
-            if(res.startsWith("Warning")) {
-                if(JOptionPane.showConfirmDialog(this, res + ". Override?", "Warning", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-                    // Logic to force assignment could go here
-                }
-            } else if (!res.equals("Success")) {
-                JOptionPane.showMessageDialog(this, res);
-            }
-            refresh();
+        ref.addActionListener(e -> {
+            model.setRowCount(0);
+            for(AdminDriverEntity d : ctrl.getDrivers()) model.addRow(new Object[]{d.id, d.name, d.status, d.activeJobs, d.rating, d.vehicle.getDetails()});
         });
-        refresh();
+        act.addActionListener(e -> update((JTable)((JScrollPane)getComponent(0)).getViewport().getView(), ctrl, "Active"));
+        susp.addActionListener(e -> update((JTable)((JScrollPane)getComponent(0)).getViewport().getView(), ctrl, "Suspended"));
+        ref.doClick();
     }
-
-    private void refresh() {
-        model.setRowCount(0);
-        for(Delivery d : frame.deliveryCtrl.getAllDeliveries()) {
-            String driverInfo = d.getAssignedDriverID() == 0 ? "None" : String.valueOf(d.getAssignedDriverID());
-            String pri = d.getAssignment() == null ? "-" : d.getAssignment().getPriority();
-            String dead = d.getAssignment() == null ? "-" : d.getAssignment().getDeadlineStr();
-            
-            model.addRow(new Object[]{d.getDeliveryID(), d.getDescription(), d.getRoute(), d.getStatus(), driverInfo, pri, dead});
-        }
-        
-        driverCombo.removeAllItems();
-        for(Driver d : frame.driverCtrl.getAllDrivers()) {
-            driverCombo.addItem(d.getUserID() + ": " + d.getName() + " (" + d.getActiveJobs() + " jobs)");
-        }
+    void update(JTable t, AdminPortalController c, String s) {
+        int r = t.getSelectedRow();
+        if(r >= 0 && c.updateDriverStatus((int)t.getValueAt(r, 0), s, "Manual")) JOptionPane.showMessageDialog(this, "Updated!");
+        else JOptionPane.showMessageDialog(this, "Failed (Active jobs?)");
     }
 }
 
-class LogsPanel extends JPanel {
-    private MainFrame frame;
-    private DefaultTableModel model;
-    private TableRowSorter<DefaultTableModel> sorter;
-
-    public LogsPanel(MainFrame frame) {
-        this.frame = frame;
+class AssignPanel extends JPanel {
+    public AssignPanel(AdminPortalController ctrl) {
         setLayout(new BorderLayout());
-        String[] cols = {"Time", "Category", "Details"};
-        
-        // OVERRIDE isCellEditable TO MAKE TABLE READ-ONLY
-        model = new DefaultTableModel(cols, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return false;
-            }
-        };
-        
+        DefaultTableModel model = new DefaultTableModel(new String[]{"ID","Desc","Route","Status","Driver","Pri","Deadline"},0);
         JTable table = new JTable(model);
-        sorter = new TableRowSorter<>(model);
-        table.setRowSorter(sorter);
         add(new JScrollPane(table), BorderLayout.CENTER);
+        JPanel bot = new JPanel();
+        JTextField drvId = new JTextField(5);
+        JButton assign = new JButton("Assign Driver ID:"), ref = new JButton("Refresh");
+        bot.add(ref); bot.add(assign); bot.add(drvId);
+        add(bot, BorderLayout.SOUTH);
 
-        JButton refreshBtn = new JButton("Refresh");
-        add(refreshBtn, BorderLayout.SOUTH);
-        refreshBtn.addActionListener(e -> refresh());
-        refresh();
+        ref.addActionListener(e -> {
+            model.setRowCount(0);
+            for(AdminDeliveryEntity d : ctrl.getDeliveries()) model.addRow(d.toRow());
+        });
+        assign.addActionListener(e -> {
+            int r = table.getSelectedRow();
+            if(r >= 0) {
+                JOptionPane.showMessageDialog(this, ctrl.assignDriver((int)model.getValueAt(r, 0), Integer.parseInt(drvId.getText()), "High", 24));
+                ref.doClick();
+            }
+        });
+        ref.doClick();
     }
+}
 
-    private void refresh() {
-        model.setRowCount(0);
-        for(AuditLog l : frame.reportCtrl.getLogs()) {
-            model.addRow(new Object[]{l.getTime(), l.getCategory(), l.getDetails()});
-        }
+class LogPanel extends JPanel {
+    public LogPanel(AdminPortalController ctrl) {
+        setLayout(new BorderLayout());
+        DefaultTableModel model = new DefaultTableModel(new String[]{"Time","Cat","Details"},0);
+        add(new JScrollPane(new JTable(model)));
+        JButton ref = new JButton("Refresh");
+        add(ref, BorderLayout.SOUTH);
+        ref.addActionListener(e -> {
+            model.setRowCount(0);
+            for(AdminAuditLog l : ctrl.getLogs()) model.addRow(new Object[]{l.time, l.cat, l.det});
+        });
+        ref.doClick();
     }
 }
 
 class ReportPanel extends JPanel {
-    private MainFrame frame; 
-    private JComboBox<String> typeCombo;
-    private JTextArea previewArea;
-
-    public ReportPanel(MainFrame frame) {
-        this.frame = frame;
+    public ReportPanel(AdminPortalController ctrl) {
         setLayout(new BorderLayout());
-        
-        JPanel controls = new JPanel();
-        controls.add(new JLabel("Type:"));
-        typeCombo = new JComboBox<>(new String[]{"Drivers", "Deliveries"});
-        controls.add(typeCombo);
-        
-        JButton genBtn = new JButton("Generate Preview");
-        controls.add(genBtn);
-        
-        JButton exportBtn = new JButton("Export .txt");
-        controls.add(exportBtn);
-        
-        add(controls, BorderLayout.NORTH);
-        
-        // MAKE TEXT AREA READ-ONLY
-        previewArea = new JTextArea();
-        previewArea.setEditable(false); 
-        
-        add(new JScrollPane(previewArea), BorderLayout.CENTER);
-        
-        genBtn.addActionListener(e -> {
-            previewArea.setText(frame.reportCtrl.generateReport((String)typeCombo.getSelectedItem()));
-        });
-        
-        exportBtn.addActionListener(e -> {
-            try (PrintWriter out = new PrintWriter(new FileWriter("export.txt"))) {
-                out.println(previewArea.getText());
-                JOptionPane.showMessageDialog(this, "Saved to export.txt");
-            } catch (IOException ex) { ex.printStackTrace(); }
-        });
+        JTextArea area = new JTextArea(); 
+        add(new JScrollPane(area));
+        JPanel top = new JPanel();
+        JButton gen = new JButton("Generate Driver Report");
+        top.add(gen);
+        add(top, BorderLayout.NORTH);
+        gen.addActionListener(e -> area.setText(ctrl.generateReport("Drivers")));
     }
 }

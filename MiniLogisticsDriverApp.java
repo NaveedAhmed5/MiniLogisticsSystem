@@ -2,23 +2,17 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * MINI LOGISTICS - DRIVER PORTAL
- * * Based on Deliverable #3 (Use Cases), #4 (Sequence), and Class Diagram.
- * * FEATURES:
- * - Registration (Sequence Pg 7)
- * - Login (Sequence Pg 8)
- * - Delivery List & Details (Sequence Pg 15)
- * - Update Status / Complete / Cancel (Sequence Pg 11-13)
- * - Profile Management (Sequence Pg 14)
+ * * Database Connected Version
+ * * Connects to 'logistics_db' via XAMPP (MySQL)
+ * * Fixed: Renamed internal classes to avoid conflicts with Admin App
+ * * Fixed: Robust Registration check for existing emails
  */
-
 public class MiniLogisticsDriverApp {
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
@@ -29,506 +23,433 @@ public class MiniLogisticsDriverApp {
     }
 }
 
-// ===========================
-// 1. ENTITY LAYER (Class Diagram)
-// ===========================
+// ==========================================
+// 1. DATABASE CONFIGURATION
+// ==========================================
+class DriverDB {
+    static final String URL = "jdbc:mysql://localhost:3306/logistics_db";
+    static final String USER = "root";
+    static final String PASS = ""; // Default XAMPP password
+    
+    public static Connection getConnection() throws SQLException {
+        return DriverManager.getConnection(URL, USER, PASS);
+    }
+}
 
-class User {
-    protected int userID;
-    protected String name;
-    protected String email;
-    protected String password;
-    protected String phone;
-
-    public User(int id, String name, String email, String password, String phone) {
-        this.userID = id;
-        this.name = name;
+// ==========================================
+// 2. ENTITIES (Renamed for Driver App Scope)
+// ==========================================
+class DriverSession {
+    int id;
+    String name, status, email, phone;
+    double earnings;
+    
+    public DriverSession(int id, String name, String status, double earnings, String email, String phone) {
+        this.id = id; 
+        this.name = name; 
+        this.status = status; 
+        this.earnings = earnings;
         this.email = email;
-        this.password = password;
         this.phone = phone;
     }
-    public String getName() { return name; }
-    public boolean validateLogin(String email, String pass) {
-        return this.email.equalsIgnoreCase(email) && this.password.equals(pass);
-    }
 }
 
-class Vehicle {
-    private String model;
-    private String plateNo;
-    private double capacity;
-    private String insuranceInfo;
-
-    public Vehicle(String model, String plateNo, double capacity, String insuranceInfo) {
-        this.model = model;
-        this.plateNo = plateNo;
-        this.capacity = capacity;
-        this.insuranceInfo = insuranceInfo;
-    }
-    public String getDetails() { return model + " [" + plateNo + "]"; }
-    // Setters for Profile Update Use Case
-    public void setModel(String m) { this.model = m; }
-    public void setPlate(String p) { this.plateNo = p; }
-}
-
-class Driver extends User {
-    private String licenseNo;
-    private String status; // Active, Pending, Suspended
-    private double rating;
-    private Vehicle vehicle; // Composition (Class Diagram)
-    private double earnings;
-
-    public Driver(int id, String name, String email, String password, String phone, String license, String status, Vehicle vehicle) {
-        super(id, name, email, password, phone);
-        this.licenseNo = license;
-        this.status = status;
-        this.rating = 5.0; // Default
-        this.vehicle = vehicle;
-        this.earnings = 0.0;
-    }
-
-    public String getStatus() { return status; }
-    public Vehicle getVehicle() { return vehicle; }
-    public double getEarnings() { return earnings; }
-    public void addEarnings(double amount) { this.earnings += amount; }
+class DriverJob {
+    int id;
+    String desc, route, status, contact;
+    double fee;
     
-    // Profile Update Methods
-    public void updateProfile(String name, String phone, String email) {
-        this.name = name; this.phone = phone; this.email = email;
+    public DriverJob(int id, String desc, String route, String status, double fee, String contact) {
+        this.id = id; 
+        this.desc = desc; 
+        this.route = route; 
+        this.status = status; 
+        this.fee = fee; 
+        this.contact = contact;
     }
 }
 
-class Delivery {
-    private int deliveryID;
-    private String pickupLoc;
-    private String dropoffLoc;
-    private String status; // Pending, Assigned, In Transit, Completed, Cancelled
-    private String description;
-    private int driverID;
-    private double fee;
-    private String customerContact;
-
-    public Delivery(int id, String desc, String pickup, String dropoff, String status, int driverID, double fee, String contact) {
-        this.deliveryID = id;
-        this.description = desc;
-        this.pickupLoc = pickup;
-        this.dropoffLoc = dropoff;
-        this.status = status;
-        this.driverID = driverID;
-        this.fee = fee;
-        this.customerContact = contact;
-    }
-
-    public int getID() { return deliveryID; }
-    public String getStatus() { return status; }
-    public void setStatus(String s) { this.status = s; }
-    public int getDriverID() { return driverID; }
-    public String getRoute() { return pickupLoc + " -> " + dropoffLoc; }
-    public String getDescription() { return description; }
-    public double getFee() { return fee; }
-    public String getContact() { return customerContact; }
+class DriverVehicleInfo {
+    String model, plate;
+    public DriverVehicleInfo(String m, String p) { model = m; plate = p; }
 }
 
-// ===========================
-// 2. CONTROLLER (Mock Logic)
-// ===========================
+// ==========================================
+// 3. CONTROLLER (Business Logic)
+// ==========================================
+class DriverAppController {
+    private DriverSession current;
 
-class PortalController {
-    private static PortalController instance;
-    private List<Driver> drivers = new ArrayList<>();
-    private List<Delivery> deliveries = new ArrayList<>();
-    private Driver currentSession;
-
-    private PortalController() {
-        // Mock Data
-        Vehicle v1 = new Vehicle("Toyota Prius", "XYZ-123", 100.0, "INS-999");
-        drivers.add(new Driver(101, "Bob Driver", "bob", "pass", "555-0101", "LIC-001", "Active", v1));
-        
-        Vehicle v2 = new Vehicle("Honda Civic", "ABC-789", 80.0, "INS-888");
-        drivers.add(new Driver(102, "Alice New", "alice", "pass", "555-0102", "LIC-002", "Pending", v2));
-
-        deliveries.add(new Delivery(501, "Medical Kit", "City Hospital", "Clinic A", "Assigned", 101, 25.0, "Dr. Smith (555-9999)"));
-        deliveries.add(new Delivery(502, "Office Chairs", "Warehouse", "Tech Corp", "In Transit", 101, 40.0, "Manager John (555-8888)"));
-        deliveries.add(new Delivery(503, "Flowers", "Florist", "Home 22B", "Completed", 101, 15.0, "Mrs. Doe"));
-    }
-
-    public static PortalController getInstance() {
-        if (instance == null) instance = new PortalController();
-        return instance;
-    }
-
-    // Login Use Case (Page 7/8)
+    // --- LOGIN LOGIC ---
     public String login(String email, String pass) {
-        for (Driver d : drivers) {
-            if (d.validateLogin(email, pass)) {
-                if ("Pending".equals(d.getStatus())) return "Account Pending Approval";
-                if ("Suspended".equals(d.getStatus())) return "Account Suspended";
-                currentSession = d;
+        try (Connection c = DriverDB.getConnection()) {
+            // Join Users and Drivers tables to get full info
+            String sql = "SELECT u.user_id, u.name, u.email, u.phone, d.status, d.earnings " +
+                         "FROM users u JOIN drivers d ON u.user_id = d.user_id " +
+                         "WHERE u.email=? AND u.password=? AND u.role='DRIVER'";
+            
+            PreparedStatement ps = c.prepareStatement(sql);
+            ps.setString(1, email); 
+            ps.setString(2, pass);
+            
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                String status = rs.getString("status");
+                if("Pending".equals(status)) return "Account Pending Approval";
+                if("Suspended".equals(status)) return "Account Suspended";
+                
+                current = new DriverSession(
+                    rs.getInt("user_id"), 
+                    rs.getString("name"), 
+                    status, 
+                    rs.getDouble("earnings"),
+                    rs.getString("email"),
+                    rs.getString("phone")
+                );
                 return "Success";
             }
-        }
-        return "Invalid Credentials";
-    }
-
-    // Registration Use Case (Page 6/7)
-    public boolean register(String name, String email, String pass, String phone, String carModel, String plate) {
-        // Check duplicate
-        if (drivers.stream().anyMatch(d -> d.email.equals(email))) return false;
-        
-        int newId = drivers.size() + 101;
-        Vehicle v = new Vehicle(carModel, plate, 50.0, "Pending Verification");
-        Driver d = new Driver(newId, name, email, pass, phone, "Pending", "Pending", v);
-        drivers.add(d);
-        return true;
-    }
-
-    public Driver getCurrentDriver() { return currentSession; }
-    public void logout() { currentSession = null; }
-
-    public List<Delivery> getMyDeliveries() {
-        return deliveries.stream()
-                .filter(d -> d.getDriverID() == currentSession.userID)
-                .collect(Collectors.toList());
-    }
-
-    // Update Status (Page 12)
-    public void updateDeliveryStatus(int id, String newStatus) {
-        for (Delivery d : deliveries) {
-            if (d.getID() == id) d.setStatus(newStatus);
+            return "Invalid Credentials";
+        } catch (SQLException e) { 
+            e.printStackTrace(); 
+            return "DB Error: " + e.getMessage(); 
         }
     }
 
-    // Complete Delivery (Page 13)
-    public void completeDelivery(int id) {
-        for (Delivery d : deliveries) {
-            if (d.getID() == id) {
-                d.setStatus("Completed");
-                currentSession.addEarnings(d.getFee());
+    // --- REGISTRATION LOGIC (Transactional) ---
+    public boolean register(String name, String email, String pass, String phone, String model, String plate) {
+        try (Connection c = DriverDB.getConnection()) {
+            // 0. Pre-check: Does email exist?
+            PreparedStatement check = c.prepareStatement("SELECT count(*) FROM users WHERE email = ?");
+            check.setString(1, email);
+            ResultSet rsCheck = check.executeQuery();
+            if(rsCheck.next() && rsCheck.getInt(1) > 0) {
+                System.out.println("DEBUG: Email " + email + " already exists.");
+                return false; // Email taken, return false to show error
             }
+
+            c.setAutoCommit(false); // Start Transaction
+
+            // 1. Insert into Users Table
+            String userSql = "INSERT INTO users (name, email, password, phone, role) VALUES (?,?,?,?,'DRIVER')";
+            PreparedStatement p1 = c.prepareStatement(userSql, Statement.RETURN_GENERATED_KEYS);
+            p1.setString(1, name); 
+            p1.setString(2, email); 
+            p1.setString(3, pass); 
+            p1.setString(4, phone);
+            p1.executeUpdate();
+            
+            ResultSet rs1 = p1.getGeneratedKeys(); 
+            rs1.next(); 
+            int uid = rs1.getInt(1); // Get the new User ID
+
+            // 2. Insert into Vehicles Table
+            String vehSql = "INSERT INTO vehicles (model, plate_no, capacity, insurance_info) VALUES (?,?,500,'Pending')";
+            PreparedStatement p2 = c.prepareStatement(vehSql, Statement.RETURN_GENERATED_KEYS);
+            p2.setString(1, model); 
+            p2.setString(2, plate);
+            p2.executeUpdate();
+            
+            ResultSet rs2 = p2.getGeneratedKeys(); 
+            rs2.next(); 
+            int vid = rs2.getInt(1); // Get the new Vehicle ID
+
+            // 3. Insert into Drivers Table (Linking User and Vehicle)
+            String driverSql = "INSERT INTO drivers (user_id, license_no, status, vehicle_id) VALUES (?, 'PENDING', 'Pending', ?)";
+            PreparedStatement p3 = c.prepareStatement(driverSql);
+            p3.setInt(1, uid); 
+            p3.setInt(2, vid);
+            p3.executeUpdate();
+            
+            c.commit(); // Commit Transaction
+            System.out.println("DEBUG: Registration Successful for " + email);
+            return true;
+        } catch (SQLException e) { 
+            e.printStackTrace(); 
+            return false; 
         }
     }
+
+    // --- FETCH JOBS ---
+    public List<DriverJob> getMyJobs() {
+        List<DriverJob> list = new ArrayList<>();
+        try (Connection c = DriverDB.getConnection()) {
+            String sql = "SELECT * FROM deliveries WHERE assigned_driver_id=?";
+            PreparedStatement ps = c.prepareStatement(sql);
+            ps.setInt(1, current.id);
+            
+            ResultSet rs = ps.executeQuery();
+            while(rs.next()) {
+                list.add(new DriverJob(
+                    rs.getInt("delivery_id"), 
+                    rs.getString("description"), 
+                    rs.getString("pickup")+" -> "+rs.getString("dropoff"), 
+                    rs.getString("status"), 
+                    rs.getDouble("fee"), 
+                    rs.getString("customer_contact")
+                ));
+            }
+        } catch (SQLException e) { e.printStackTrace(); }
+        return list;
+    }
+
+    // --- UPDATE STATUS ---
+    public void updateStatus(int jobId, String status) {
+        try (Connection c = DriverDB.getConnection()) {
+            String sql = "UPDATE deliveries SET status=? WHERE delivery_id=?";
+            PreparedStatement ps = c.prepareStatement(sql);
+            ps.setString(1, status); 
+            ps.setInt(2, jobId);
+            ps.executeUpdate();
+            
+            // If Completed, update earnings
+            if("COMPLETED".equalsIgnoreCase(status)) {
+                String earnSql = "UPDATE drivers SET earnings = earnings + (SELECT fee FROM deliveries WHERE delivery_id=?) WHERE user_id=?";
+                PreparedStatement p2 = c.prepareStatement(earnSql);
+                p2.setInt(1, jobId); 
+                p2.setInt(2, current.id);
+                p2.executeUpdate();
+                
+                // Refresh local session earnings
+                String refreshSql = "SELECT earnings FROM drivers WHERE user_id=?";
+                PreparedStatement p3 = c.prepareStatement(refreshSql);
+                p3.setInt(1, current.id);
+                ResultSet rs = p3.executeQuery();
+                if(rs.next()) current.earnings = rs.getDouble(1);
+            }
+        } catch (SQLException e) { e.printStackTrace(); }
+    }
+    
+    // --- PROFILE INFO ---
+    public DriverVehicleInfo getVehicleInfo() {
+        try (Connection c = DriverDB.getConnection()) {
+            String sql = "SELECT v.model, v.plate_no FROM vehicles v JOIN drivers d ON d.vehicle_id = v.vehicle_id WHERE d.user_id=?";
+            PreparedStatement ps = c.prepareStatement(sql);
+            ps.setInt(1, current.id);
+            ResultSet rs = ps.executeQuery();
+            if(rs.next()) return new DriverVehicleInfo(rs.getString(1), rs.getString(2));
+        } catch(SQLException e) {}
+        return new DriverVehicleInfo("Unknown", "Unknown");
+    }
+
+    public boolean updateProfile(String name, String phone, String email) {
+        try (Connection c = DriverDB.getConnection()) {
+            String sql = "UPDATE users SET name=?, phone=?, email=? WHERE user_id=?";
+            PreparedStatement ps = c.prepareStatement(sql);
+            ps.setString(1, name); ps.setString(2, phone); ps.setString(3, email); ps.setInt(4, current.id);
+            ps.executeUpdate();
+            
+            // Update local session
+            current.name = name; current.phone = phone; current.email = email;
+            return true;
+        } catch(SQLException e) { return false; }
+    }
+    
+    public DriverSession getSession() { return current; }
+    public void logout() { current = null; }
 }
 
-// ===========================
-// 3. VIEW LAYER (Swing)
-// ===========================
-
+// ==========================================
+// 4. VIEW LAYER (Swing UI)
+// ==========================================
 class MainDriverFrame extends JFrame {
-    CardLayout cardLayout = new CardLayout();
-    JPanel mainPanel = new JPanel(cardLayout);
-    PortalController controller = PortalController.getInstance();
+    CardLayout cards = new CardLayout();
+    JPanel main = new JPanel(cards);
+    DriverAppController ctrl = new DriverAppController();
 
     public MainDriverFrame() {
-        setTitle("Driver Portal - Mini Logistics");
-        setSize(400, 700); // Mobile-like aspect ratio
+        setTitle("Driver App - DB Connected"); 
+        setSize(400, 700); 
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-
-        mainPanel.add(new LoginPanel(this), "LOGIN");
-        mainPanel.add(new RegisterPanel(this), "REGISTER");
-        // Dashboard added dynamically after login
-
-        add(mainPanel);
+        
+        main.add(new LoginP(this), "LOGIN");
+        main.add(new RegP(this), "REG");
+        // Dashboard added dynamically
+        
+        add(main);
     }
-
-    public void showDashboard() {
-        mainPanel.add(new DriverDashboard(this), "DASHBOARD");
-        cardLayout.show(mainPanel, "DASHBOARD");
+    
+    void goDash() { 
+        main.add(new DashP(this), "DASH"); // Re-create to refresh data
+        cards.show(main, "DASH"); 
     }
-
-    public void showRegister() { cardLayout.show(mainPanel, "REGISTER"); }
-    public void showLogin() { cardLayout.show(mainPanel, "LOGIN"); }
+    void goReg() { cards.show(main, "REG"); }
+    void goLog() { cards.show(main, "LOGIN"); }
 }
 
-class LoginPanel extends JPanel {
-    public LoginPanel(MainDriverFrame frame) {
-        setLayout(new GridBagLayout());
-        setBackground(Color.WHITE);
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(10,10,10,10);
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-
-        JLabel title = new JLabel("Driver Login");
-        title.setFont(new Font("Arial", Font.BOLD, 24));
+class LoginP extends JPanel {
+    public LoginP(MainDriverFrame f) {
+        setLayout(new GridLayout(5,1,10,10)); 
+        setBorder(new EmptyBorder(50,20,50,20));
         
-        JTextField emailField = new JTextField(15);
-        JPasswordField passField = new JPasswordField(15);
-        JButton loginBtn = new JButton("Login");
-        JButton regBtn = new JButton("Register as Driver");
-
-        gbc.gridx=0; gbc.gridy=0; gbc.gridwidth=2; add(title, gbc);
-        gbc.gridy=1; gbc.gridwidth=1; add(new JLabel("Email:"), gbc);
-        gbc.gridx=1; add(emailField, gbc);
-        gbc.gridx=0; gbc.gridy=2; add(new JLabel("Password:"), gbc);
-        gbc.gridx=1; add(passField, gbc);
-        gbc.gridx=0; gbc.gridy=3; gbc.gridwidth=2; add(loginBtn, gbc);
-        gbc.gridy=4; add(regBtn, gbc);
-
-        // Pre-fill for demo
-        emailField.setText("bob"); passField.setText("pass");
-
-        loginBtn.addActionListener(e -> {
-            String res = frame.controller.login(emailField.getText(), new String(passField.getPassword()));
-            if ("Success".equals(res)) frame.showDashboard();
+        JTextField em = new JTextField("bob"); // Default for quick test
+        JPasswordField pw = new JPasswordField("pass");
+        JButton log = new JButton("Login");
+        JButton reg = new JButton("Create Account");
+        
+        add(new JLabel("Email:")); add(em); 
+        add(new JLabel("Password:")); add(pw);
+        add(log); add(reg);
+        
+        log.addActionListener(e -> {
+            String res = f.ctrl.login(em.getText(), new String(pw.getPassword()));
+            if("Success".equals(res)) f.goDash();
             else JOptionPane.showMessageDialog(this, res);
         });
-
-        regBtn.addActionListener(e -> frame.showRegister());
+        
+        reg.addActionListener(e -> f.goReg());
     }
 }
 
-class RegisterPanel extends JPanel {
-    public RegisterPanel(MainDriverFrame frame) {
-        setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
+class RegP extends JPanel {
+    public RegP(MainDriverFrame f) {
+        setLayout(new GridLayout(8,2, 5, 5)); 
         setBorder(new EmptyBorder(20,20,20,20));
-
-        add(new JLabel("Driver Registration"));
         
-        JTextField name = new JTextField();
-        JTextField email = new JTextField();
-        JPasswordField pass = new JPasswordField();
-        JTextField phone = new JTextField();
-        JTextField carModel = new JTextField();
-        JTextField plate = new JTextField();
-
-        add(new JLabel("Full Name:")); add(name);
-        add(new JLabel("Email:")); add(email);
-        add(new JLabel("Password:")); add(pass);
-        add(new JLabel("Phone:")); add(phone);
-        add(Box.createVerticalStrut(10));
-        add(new JLabel("Vehicle Model:")); add(carModel);
-        add(new JLabel("License Plate:")); add(plate);
+        JTextField nm=new JTextField(), em=new JTextField(), ph=new JTextField(), md=new JTextField(), pl=new JTextField();
+        JPasswordField pw=new JPasswordField();
         
-        JButton uploadDocs = new JButton("Upload Documents (License/Ins)");
-        uploadDocs.addActionListener(e -> JOptionPane.showMessageDialog(this, "Documents Uploaded Successfully!"));
-        add(Box.createVerticalStrut(10));
-        add(uploadDocs);
-
-        JButton submit = new JButton("Submit Application");
-        submit.addActionListener(e -> {
-            if(frame.controller.register(name.getText(), email.getText(), new String(pass.getPassword()), phone.getText(), carModel.getText(), plate.getText())) {
-                JOptionPane.showMessageDialog(this, "Registration Successful!\nAccount is Pending Approval.");
-                frame.showLogin();
+        add(new JLabel("Name:")); add(nm); 
+        add(new JLabel("Email:")); add(em);
+        add(new JLabel("Password:")); add(pw); 
+        add(new JLabel("Phone:")); add(ph);
+        add(new JLabel("Car Model:")); add(md); 
+        add(new JLabel("Plate No:")); add(pl);
+        
+        JButton sub = new JButton("Register");
+        JButton back = new JButton("Back");
+        add(sub); add(back);
+        
+        sub.addActionListener(e -> {
+            if(f.ctrl.register(nm.getText(), em.getText(), new String(pw.getPassword()), ph.getText(), md.getText(), pl.getText())) {
+                JOptionPane.showMessageDialog(this, "Registration Successful!\nWait for Admin Approval.");
+                f.goLog();
             } else {
-                JOptionPane.showMessageDialog(this, "Email already exists.");
+                JOptionPane.showMessageDialog(this, "Registration Failed.\nEmail might be already taken.");
             }
         });
-
-        JButton back = new JButton("Back to Login");
-        back.addActionListener(e -> frame.showLogin());
-
-        add(Box.createVerticalStrut(20));
-        add(submit);
-        add(back);
+        
+        back.addActionListener(e -> f.goLog());
     }
 }
 
-class DriverDashboard extends JPanel {
+class DashP extends JPanel {
     private MainDriverFrame frame;
     private JTabbedPane tabs;
 
-    public DriverDashboard(MainDriverFrame frame) {
-        this.frame = frame;
+    public DashP(MainDriverFrame f) {
+        this.frame = f;
         setLayout(new BorderLayout());
-
+        
         tabs = new JTabbedPane();
-        tabs.addTab("My Deliveries", new ActiveDeliveriesPanel(frame));
-        tabs.addTab("History", new HistoryPanel(frame)); // Reuses logic filtered by 'Completed'
-        tabs.addTab("Profile", new ProfilePanel(frame));
-
+        tabs.addTab("My Jobs", new JobsTab(frame));
+        tabs.addTab("Profile", new ProfileTab(frame));
+        
         add(tabs, BorderLayout.CENTER);
         
         JButton logout = new JButton("Logout");
         logout.addActionListener(e -> {
-            frame.controller.logout();
-            frame.showLogin();
+            frame.ctrl.logout();
+            frame.goLog();
         });
         add(logout, BorderLayout.NORTH);
     }
 }
 
-class ActiveDeliveriesPanel extends JPanel {
-    private MainDriverFrame frame;
-    private DefaultTableModel model;
-    private JTable table;
-
-    public ActiveDeliveriesPanel(MainDriverFrame frame) {
-        this.frame = frame;
+class JobsTab extends JPanel {
+    public JobsTab(MainDriverFrame f) {
         setLayout(new BorderLayout());
         
-        String[] cols = {"ID", "Route", "Status", "Fee"};
-        model = new DefaultTableModel(cols, 0) {
+        String[] cols = {"ID","Route","Status","Fee"};
+        DefaultTableModel model = new DefaultTableModel(cols, 0) {
             public boolean isCellEditable(int r, int c) { return false; }
         };
-        table = new JTable(model);
-        add(new JScrollPane(table), BorderLayout.CENTER);
-
-        JPanel btnPanel = new JPanel();
-        JButton viewBtn = new JButton("View Details & Actions");
-        JButton refreshBtn = new JButton("Refresh");
-        btnPanel.add(viewBtn);
-        btnPanel.add(refreshBtn);
-        add(btnPanel, BorderLayout.SOUTH);
-
-        viewBtn.addActionListener(e -> {
-            int row = table.getSelectedRow();
-            if (row >= 0) {
-                int id = (Integer) model.getValueAt(row, 0);
-                showDeliveryDetails(id);
-            }
-        });
-
-        refreshBtn.addActionListener(e -> refresh());
-        refresh();
-    }
-
-    private void refresh() {
-        model.setRowCount(0);
-        for (Delivery d : frame.controller.getMyDeliveries()) {
-            // Only show active jobs
-            if (!"Completed".equals(d.getStatus()) && !"Cancelled".equals(d.getStatus())) {
-                model.addRow(new Object[]{d.getID(), d.getRoute(), d.getStatus(), "$" + d.getFee()});
-            }
-        }
-    }
-
-    // Delivery Detail Use Case (Page 15)
-    private void showDeliveryDetails(int id) {
-        Delivery d = frame.controller.getMyDeliveries().stream().filter(x -> x.getID() == id).findFirst().orElse(null);
-        if (d == null) return;
-
-        JDialog dlg = new JDialog(frame, "Delivery #" + id, true);
-        dlg.setSize(400, 500);
-        dlg.setLayout(new BoxLayout(dlg.getContentPane(), BoxLayout.Y_AXIS));
-        JPanel p = (JPanel) dlg.getContentPane();
-        p.setBorder(new EmptyBorder(10,10,10,10));
-
-        p.add(new JLabel("<html><h2>" + d.getDescription() + "</h2></html>"));
-        p.add(new JLabel("Route: " + d.getRoute()));
-        p.add(new JLabel("Customer: " + d.getContact()));
-        p.add(new JLabel("Fee: $" + d.getFee()));
-        p.add(new JLabel("Current Status: " + d.getStatus()));
-        
-        // Simulated Map View
-        JPanel map = new JPanel();
-        map.setBackground(Color.LIGHT_GRAY);
-        map.setPreferredSize(new Dimension(350, 150));
-        map.add(new JLabel("[ MAP VIEW: GPS Tracking ]"));
-        p.add(Box.createVerticalStrut(10));
-        p.add(map);
-
-        // Action Buttons
-        JButton navBtn = new JButton("Start Navigation"); // Mock
-        p.add(navBtn);
-
-        // Update Status (Page 12)
-        JPanel statusPanel = new JPanel();
-        String[] states = {"Picked Up", "In Transit", "Out for Delivery"};
-        JComboBox<String> statusCombo = new JComboBox<>(states);
-        JButton updateBtn = new JButton("Update Status");
-        statusPanel.add(statusCombo);
-        statusPanel.add(updateBtn);
-        p.add(statusPanel);
-
-        updateBtn.addActionListener(e -> {
-            frame.controller.updateDeliveryStatus(id, (String) statusCombo.getSelectedItem());
-            dlg.dispose();
-            refresh();
-            JOptionPane.showMessageDialog(frame, "Status Updated & Customer Notified.");
-        });
-
-        // Complete / Cancel
-        JPanel finalPanel = new JPanel();
-        JButton completeBtn = new JButton("Complete");
-        JButton cancelBtn = new JButton("Cancel");
-        finalPanel.add(completeBtn);
-        finalPanel.add(cancelBtn);
-        p.add(finalPanel);
-
-        // Complete Delivery (Page 13)
-        completeBtn.addActionListener(e -> {
-            String proof = JOptionPane.showInputDialog(dlg, "Enter Proof of Delivery (Sign/Code):");
-            if (proof != null && !proof.trim().isEmpty()) {
-                frame.controller.completeDelivery(id);
-                dlg.dispose();
-                refresh();
-                JOptionPane.showMessageDialog(frame, "Delivery Completed! Earnings Updated.");
-            }
-        });
-
-        // Cancel Delivery (Page 11)
-        cancelBtn.addActionListener(e -> {
-            String reason = JOptionPane.showInputDialog(dlg, "Enter Cancellation Reason (Min 10 chars):");
-            if (reason != null && reason.length() >= 10) {
-                frame.controller.updateDeliveryStatus(id, "Cancelled");
-                dlg.dispose();
-                refresh();
-                JOptionPane.showMessageDialog(frame, "Delivery Cancelled. Admin Notified.");
-            } else if (reason != null) {
-                JOptionPane.showMessageDialog(dlg, "Reason too short.");
-            }
-        });
-
-        dlg.setVisible(true);
-    }
-}
-
-class HistoryPanel extends JPanel {
-    public HistoryPanel(MainDriverFrame frame) {
-        setLayout(new BorderLayout());
-        DefaultTableModel model = new DefaultTableModel(new String[]{"ID", "Desc", "Status", "Earned"}, 0);
         JTable table = new JTable(model);
         add(new JScrollPane(table), BorderLayout.CENTER);
-
-        JButton ref = new JButton("Refresh History");
-        add(ref, BorderLayout.SOUTH);
         
+        JPanel bot = new JPanel();
+        JButton ref = new JButton("Refresh");
+        JButton upd = new JButton("Update Status");
+        bot.add(ref); bot.add(upd);
+        add(bot, BorderLayout.SOUTH);
+        
+        // Top Info
+        JLabel info = new JLabel();
+        info.setHorizontalAlignment(SwingConstants.CENTER);
+        info.setBorder(new EmptyBorder(10,0,10,0));
+        add(info, BorderLayout.NORTH);
+
+        // Refresh Action
         ref.addActionListener(e -> {
             model.setRowCount(0);
-            for (Delivery d : frame.controller.getMyDeliveries()) {
-                if ("Completed".equals(d.getStatus()) || "Cancelled".equals(d.getStatus())) {
-                    model.addRow(new Object[]{d.getID(), d.getDescription(), d.getStatus(), "$" + d.getFee()});
-                }
+            DriverSession s = f.ctrl.getSession();
+            info.setText("<html>Driver: <b>" + s.name + "</b> | Earnings: <b>$" + s.earnings + "</b></html>");
+            
+            for(DriverJob j : f.ctrl.getMyJobs()) {
+                model.addRow(new Object[]{j.id, j.route, j.status, j.fee});
             }
         });
+
+        // Update Action
+        upd.addActionListener(e -> {
+            int r = table.getSelectedRow();
+            if(r < 0) {
+                JOptionPane.showMessageDialog(this, "Select a job first.");
+                return;
+            }
+            int id = (int)model.getValueAt(r, 0);
+            String[] ops = {"Picked Up", "In Transit", "COMPLETED", "CANCELLED"};
+            String s = (String) JOptionPane.showInputDialog(this, "Set Status:", "Update", JOptionPane.QUESTION_MESSAGE, null, ops, ops[0]);
+            
+            if(s != null) {
+                f.ctrl.updateStatus(id, s);
+                ref.doClick();
+            }
+        });
+        
+        // Auto Load
+        ref.doClick();
     }
 }
 
-class ProfilePanel extends JPanel {
-    public ProfilePanel(MainDriverFrame frame) {
-        setLayout(new GridLayout(6, 2, 10, 10));
+class ProfileTab extends JPanel {
+    public ProfileTab(MainDriverFrame f) {
+        setLayout(new GridLayout(6,2, 10, 10));
         setBorder(new EmptyBorder(20,20,20,20));
-
-        JTextField name = new JTextField();
-        JTextField phone = new JTextField();
-        JTextField email = new JTextField();
-        JTextField car = new JTextField();
-        JTextField plate = new JTextField();
         
-        add(new JLabel("Name:")); add(name);
-        add(new JLabel("Phone:")); add(phone);
-        add(new JLabel("Email:")); add(email);
+        JTextField nm=new JTextField(), ph=new JTextField(), em=new JTextField();
+        JTextField car=new JTextField(), pl=new JTextField();
+        car.setEditable(false); pl.setEditable(false); // Vehicle info read-only for simplicity
+        
+        add(new JLabel("Name:")); add(nm);
+        add(new JLabel("Phone:")); add(ph);
+        add(new JLabel("Email:")); add(em);
         add(new JLabel("Vehicle:")); add(car);
-        add(new JLabel("Plate:")); add(plate);
-
-        JButton load = new JButton("Load My Info");
-        JButton save = new JButton("Save Changes");
+        add(new JLabel("Plate:")); add(pl);
+        
+        JButton load = new JButton("Load Info");
+        JButton save = new JButton("Save");
         add(load); add(save);
-
+        
         load.addActionListener(e -> {
-            Driver d = frame.controller.getCurrentDriver();
-            name.setText(d.getName());
-            email.setText("bob"); // mock accessor
-            phone.setText("555-0101");
-            car.setText(d.getVehicle().getDetails());
+            DriverSession s = f.ctrl.getSession();
+            nm.setText(s.name);
+            ph.setText(s.phone);
+            em.setText(s.email);
+            
+            DriverVehicleInfo v = f.ctrl.getVehicleInfo();
+            car.setText(v.model);
+            pl.setText(v.plate);
         });
-
+        
         save.addActionListener(e -> {
-            Driver d = frame.controller.getCurrentDriver();
-            d.updateProfile(name.getText(), phone.getText(), email.getText());
-            d.getVehicle().setModel(car.getText());
-            d.getVehicle().setPlate(plate.getText());
-            JOptionPane.showMessageDialog(this, "Profile Updated Successfully!");
+            if(f.ctrl.updateProfile(nm.getText(), ph.getText(), em.getText())) {
+                JOptionPane.showMessageDialog(this, "Profile Updated!");
+            } else {
+                JOptionPane.showMessageDialog(this, "Update Failed (Email might be duplicate).");
+            }
         });
+        
+        load.doClick();
     }
 }
