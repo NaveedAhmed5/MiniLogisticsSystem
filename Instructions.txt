@@ -1,0 +1,70 @@
+📦 Mini Logistics System — How to Compile & Run (Windows)
+
+This project uses Java, MySQL, and the MySQL Connector/J driver.
+These instructions explain exactly how to compile and run the system using Windows PowerShell and VS Code terminal.
+
+✅ 1. Folder Structure (Important)
+
+Your project must follow this structure:
+
+Packaged/
+│
+├── mysql-connector-j-9.5.0.jar
+├── src/
+│   └── com/
+│       └── minilogistics/
+│           ├── main/
+│           │   ├── AdminApp.java
+│           │   └── DriverApp.java
+│           ├── controllers/
+│           ├── models/
+│           ├── views/
+│           └── utils/
+
+
+Make sure all Java files are inside src/com/minilogistics/...
+
+✅ 2. Open Terminal in the Correct Folder
+
+Open PowerShell inside the Packaged directory:
+
+C:\...\Final_Project\Implementation\Packaged>
+
+✅ 3. Compile All Java Files
+
+Windows does not support wildcards like **/*.java, so use this command:
+
+javac -cp ".;mysql-connector-j-9.5.0.jar" -d . (Get-ChildItem -Recurse -Filter *.java).FullName
+
+
+This will:
+
+✔ Compile every .java file
+✔ Generate .class files in the correct package folders
+✔ Make the project ready to run
+
+✅ 4. Run the Admin Panel
+java -cp ".;mysql-connector-j-9.5.0.jar" com.minilogistics.main.AdminApp
+
+✅ 5. Run the Driver Panel
+java -cp ".;mysql-connector-j-9.5.0.jar" com.minilogistics.main.DriverApp
+
+📌 Troubleshooting
+❗ Error: Could not find or load main class
+
+Run this and send the output:
+
+tree /F src
+
+
+This means the package name or classpath is incorrect.
+
+📌 Requirements
+
+Java JDK 17+
+
+MySQL installed and running
+
+mysql-connector-j-9.5.0.jar placed inside the Packaged folder
+
+Database configured in your config class
